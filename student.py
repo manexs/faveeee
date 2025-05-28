@@ -9,7 +9,7 @@ from dotenv import load_dotenv
 import sqlite3
 import json
 from flask import jsonify, request
-import traceback  # Add with other imports
+import traceback 
 import requests
 from pymongo import MongoClient
 from datetime import datetime, timedelta
@@ -29,14 +29,14 @@ import random
 import io
 import base64
 import os
-import uuid  # Add this import for UUID generation
+import uuid  
 from werkzeug.utils import secure_filename
 import matplotlib
 from datetime import datetime
-import re  # For regex pattern matching in JSON extraction
-matplotlib.use('Agg')  # Use non-interactive backend
+import re  
+matplotlib.use('Agg')  # non-interactive backend
 
-# Add near the top of your file, after imports and before app configuration
+
 try:
     # MongoDB Connection
     mongo_client = MongoClient('mongodb://localhost:27017/')
@@ -69,13 +69,7 @@ except Exception as e:
     # Fallback to SQLite if MongoDB connection fails
     print("Falling back to SQLite...")
     using_mongodb = False
-# Add the ConversationContextManager class right after the MongoDB connection block that starts with:
-# try:
-#     # MongoDB Connection
-#     mongo_client = MongoClient('mongodb://localhost:27017/')
-# ...
 
-# Add the class here, around line 94
 
 class ConversationContextManager:
     def __init__(self, db):
@@ -206,7 +200,7 @@ for items in MARKETPLACE_CATEGORIES.values():
     ALL_MARKETPLACE_ITEMS.extend(items)
 ALL_MARKETPLACE_ITEMS = list(set(ALL_MARKETPLACE_ITEMS))  # Remove duplicates
 
-# Updated LLM prompt for classifying user queries in a social platform
+
 # Updated LLM prompt for classifying user queries in a social platform
 CLASSIFIER_PROMPT = """
 You are an AI designed to analyze and classify user queries on a social platform.
@@ -510,7 +504,7 @@ class UserClusterer:
         marketplace_offering_features = [f'offering_{i}' for i in ALL_MARKETPLACE_ITEMS]
         marketplace_need_features = [f'need_{i}' for i in ALL_MARKETPLACE_ITEMS]
         
-        # Store feature names for later use
+        
         self.feature_names = {
             'numerical': numerical_features,
             'categorical': categorical_features,
@@ -4659,7 +4653,7 @@ Analyze this conversation to identify the user's interests, intentions, and need
                 print("No user_id provided, can't store interest")
                 return None
                 
-            # Create an interest record
+            #interest record
             timestamp = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
             interest_id = f"interest_{timestamp}_{uuid.uuid4().hex[:8]}"
             
@@ -4719,7 +4713,7 @@ Analyze this conversation to identify the user's interests, intentions, and need
         except Exception as e:
             print(f"Error storing user interest: {str(e)}")
             import traceback
-            traceback.print_exc()  # Print stack trace for better debugging
+            traceback.print_exc()  # Print stack trace 
             return None
 
    
@@ -4913,10 +4907,10 @@ interest_capture = InterestCaptureManager(client, db, using_mongodb)
 def process_chat_query(user_message, filename=None, conversation_history=None, user_id=None, request=None):
     """Handle LLM queries using the three-layer approach with conversation history + Enhanced Filtering System"""
     try:
-        # Create a session key that's unique to this user/conversation
+        # session key that's unique to this user/conversation
         session_key = f"event_creation_state_{user_id}" if user_id else "event_creation_state"
         
-        # ===== CRITICAL DEBUG LOGGING - ALWAYS FIRST =====
+        
         print(f"🔍 CONFIRMATION DEBUG: user_message='{user_message}'")
         print(f"🔍 CONFIRMATION DEBUG: user_id={user_id}")
         print(f"🔍 CONFIRMATION DEBUG: session_key='{session_key}'")
@@ -4932,7 +4926,7 @@ def process_chat_query(user_message, filename=None, conversation_history=None, u
         print(f"🔍 CONFIRMATION DEBUG: current_step='{current_step}'")
         
         # ===== ABSOLUTE PRIORITY: CONFIRMATION STEP DETECTION =====
-        # This MUST be the first check - no exceptions!
+        # This MUST be the first check - no exceptions
         if in_event_creation and current_step in ['confirm', 'confirm_details']:
             print(f"🎯 CONFIRMATION DETECTED: User is in confirmation step with message '{user_message}'")
             
@@ -4961,18 +4955,18 @@ def process_chat_query(user_message, filename=None, conversation_history=None, u
         filtering_key = f"attendee_filtering_{user_id}"
         waiting_key = f"waiting_for_responses_{user_id}"
         
-        # 1. Check rescheduling decision (time-sensitive)
+        # 1. Checks rescheduling decision (time-sensitive)
         rescheduling_result = handle_rescheduling_decision_query(user_message, user_id)
         if rescheduling_result is not None:
             print(f"User {user_id} is making a rescheduling decision")
             return rescheduling_result
         
-        # 2. Check if user is in attendee filtering mode
+        # 2. Checks if user is in attendee filtering mode
         if filtering_key in session:
             print(f"User {user_id} is in attendee filtering mode")
             return handle_attendee_filtering(user_message, user_id, session[filtering_key])
         
-        # 3. Check if user is waiting for event responses (15-min period)
+        # 3. Checks if user is waiting for event responses 
         if waiting_key in session:
             waiting_state = session[waiting_key]
             deadline = datetime.strptime(waiting_state['deadline'], "%Y-%m-%d %H:%M:%S")
@@ -5002,7 +4996,7 @@ def process_chat_query(user_message, filename=None, conversation_history=None, u
                         pipeline = [
                             {'$match': {'event_id': waiting_state['event_id']}},
                             {'$group': {
-                                '_id': '$status',  # Using correct field name
+                                '_id': '$status',  
                                 'count': {'$sum': 1}
                             }}
                         ]
@@ -5085,7 +5079,7 @@ def process_chat_query(user_message, filename=None, conversation_history=None, u
                     }
                 }
         
-        # ===== LAYER 1: Query Classification =====
+        # LAYER 1: Query Classification
         print(f"Processing query: {user_message}")
         
         # Enhanced override logic for event creation steps (excluding confirmation)
@@ -5099,7 +5093,7 @@ def process_chat_query(user_message, filename=None, conversation_history=None, u
             print("In event creation flow, maintaining classification as event_creation")
             classification = {"query_type": "event_creation", "entities": {}}
         else:
-            # Normal classification path - call the LLM
+            # Normal classification  call the LLM
             print("Calling LLM for query classification...")
             classifier_response = client.chat.completions.create(
                 model="anthropic/claude-3-opus:beta",
@@ -5139,16 +5133,16 @@ def process_chat_query(user_message, filename=None, conversation_history=None, u
         
         print(f"Processing query of type '{query_type}' with entities: {entities}")
         
-        # ===== HANDLE DIFFERENT QUERY TYPES =====
+        # HANDLE DIFFERENT QUERY TYPES
         
         if query_type == 'general_knowledge':
             print("General knowledge question detected, analyzing for interests")
             
-            # Extract interests and create summary
+            # Extracts the interests and create summary
             context_analysis = interest_capture.analyze_conversation(conversation_history, user_message)
             print(f"Interest analysis: {context_analysis}")
             
-            # Store the interest if confidence is medium or high
+            # Stores the interest if confidence is medium or high
             interest_id = None
             if context_analysis.get('confidence', 'low') in ['medium', 'high'] and user_id:
                 interest_id = interest_capture.store_interest(user_id, context_analysis)
@@ -5207,10 +5201,10 @@ def process_chat_query(user_message, filename=None, conversation_history=None, u
             )   
             
         else:
-            # Handle other query types (interest search, etc.)
+            # Handles other query types (like interest search and all)
             print("Handling other query types")
             
-            # Find the best available dataset file
+            # Find the best available dataset file(i used the generated_dataset.csv)
             if filename is None:
                 possible_files = [
                     'clustered_generated_dataset.csv', 
@@ -5271,7 +5265,7 @@ def process_chat_query(user_message, filename=None, conversation_history=None, u
                             'matching_users': matching_users
                         }
                 
-                # Add other query type handling as needed...
+                
                 
             except Exception as e:
                 print(f"Error processing dataset: {str(e)}")
@@ -5316,7 +5310,7 @@ def process_chat_query(user_message, filename=None, conversation_history=None, u
         return {'success': False, 'message': f'Error: {str(e)}'}
 conversation_store = {}  # Dictionary to store conversations by session ID
 
-# ===== NEW SUPPORTING FUNCTIONS =====
+
 
 def get_user_filtering_state_from_database(user_id):
     """Get user's filtering state from database"""
@@ -5697,7 +5691,7 @@ def save_event(event_details):
 def save_event_response(event_id, user_id, status, time, response_text):
     """Save a user's response to an event invitation"""
     try:
-        # Ensure we have valid values
+        # Ensures that we have valid values
         if event_id is None or user_id is None:
             print(f"Warning: Missing required data for event response: event_id={event_id}, user_id={user_id}")
             return False
@@ -5724,14 +5718,14 @@ def save_event_response(event_id, user_id, status, time, response_text):
                 {'$set': {'participants.$': response_doc}}
             )
             
-            # If the user is not already a participant, add them
+            # If the user is not already a participant add the user 
             if result.matched_count == 0:
                 db.events.update_one(
                     {'event_id': event_id},
                     {'$push': {'participants': response_doc}}
                 )
                 
-            # Also create a separate event_responses document
+            # create a separate event_responses document
             db.event_responses.update_one(
                 {'event_id': event_id, 'user_id': user_id},
                 {'$set': {
