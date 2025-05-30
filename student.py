@@ -3885,7 +3885,7 @@ def get_user_state(user_id):
             ''')
             
             c.execute('SELECT current_state, state_data FROM user_states WHERE user_id = ?', (user_id,))
-            result = c.fetchone()
+            result = c.fetchone()ated
             conn.close()
             
             if result:
