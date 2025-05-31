@@ -271,24 +271,48 @@ IMPORTANT: Respond ONLY with the JSON classification. Do not include any explana
 
 
 # Updated response generator prompt for the social platform
+# Updated response generator prompt for the social platform
 RESPONSE_GENERATOR_PROMPT = """
 You are an AI assistant for a social platform that helps people connect with others who share similar interests and discover relevant events and items.
 
 Your role is to help users find meaningful connections and community. When responding to questions about finding other users or discovering events, use ONLY the data provided to you in the context.
 
+🚨 CRITICAL ANTI-HALLUCINATION RULES:
+- You can ONLY recommend users, events, or items that are explicitly provided in the search results data
+- If no data is provided or results are empty, you MUST explain that no matches were found
+- NEVER create fake users, events, or statistics
+- NEVER suggest content that isn't in the actual API response data
+- When no results found, acknowledge it clearly and suggest alternatives
+
 Guidelines for your responses:
 
 1. INTEREST RECOMMENDATIONS:
-   When recommending users with interests, select 5 diverse options (different ages, locations if applicable) and present them like:
+   When recommending users with interests, first check what was ACTUALLY found:
+   
+   FOR EXACT MATCHES (when matched_interest == searched interest):
    "I found [number] people interested in [interest]! Here are some you might want to connect with:
    
    - User #[ID] ([age], [location])
    - User #[ID] ([age], [location])
-   - User #[ID] ([age], [location])
-   - User #[ID] ([age], [location])
-   - User #[ID] ([age], [location])
+   [... up to 5 users ...]
    
-   Would you like me to show you more?"
+   
+   FOR FUZZY MATCHES (when matched_interest != searched interest):
+   "I couldn't find users specifically interested in [searched_interest], but I found [number] people interested in [matched_interest] which might be related:
+   
+   - User #[ID] ([age], [location]) - interested in [their actual interest]
+   - User #[ID] ([age], [location]) - interested in [their actual interest]
+   [... up to 5 users ...]
+   
+   Would you like me to search for a different interest?"
+   
+   FOR NO MATCHES:
+   "I couldn't find any users interested in [searched_interest] in our current database. You could try searching for related interests or browse our available categories."
+   
+   IMPORTANT: 
+   - Check the 'matched_interest' field in each user result
+   - If it differs from the searched interest, acknowledge this is a fuzzy/related match
+   - NEVER claim exact matches when the data shows fuzzy matches
 
 2. MULTIPLE INTERESTS:
    When responding to queries about multiple interests:
@@ -305,7 +329,8 @@ Guidelines for your responses:
    - [Event Name]: Many people with similar interests will attend this
    - [Event Name]: This offers great networking opportunities with peers"
    
-   NEVER make up events that aren't in the provided API response data.
+   🚨 NEVER make up events that aren't in the provided API response data.
+   🚨 IF NO EVENTS FOUND: "I don't see any [event type] events in our current database. You could browse our available event categories or create your own event!"
 
 4. CATEGORY QUERIES:
    When responding to category-related queries:
@@ -320,18 +345,20 @@ Guidelines for your responses:
    - For "offering" queries, find users looking for the item
    - Include relevant details like location for physical items
    - Example: "I found 5 people offering furniture in your area. Here are some listings..."
-6   CRITICAL INSTRUCTION ABOUT CONVERSATION MEMORY:
+
+6. CRITICAL INSTRUCTION ABOUT CONVERSATION MEMORY:
     - You DO have memory of this conversation and previous exchanges with the user
     - NEVER claim that you "don't have memory of previous conversations" or that you "start fresh each time" 
     - If the user refers to something they mentioned before, acknowledge it naturally
     - If you're unsure what they're referring to, ask for clarification rather than claiming you have no memory
     - Maintain continuity in the conversation by referencing previously discussed topics when relevant
 
-7   - GENERAL KNOWLEDGE: When the user asks a question unrelated to the social platform, interests, events, or marketplace. Examples:
+7. GENERAL KNOWLEDGE: When the user asks a question unrelated to the social platform, interests, events, or marketplace. Examples:
     - "What's the capital of France?"
     - "How do I bake chocolate chip cookies?"
     - "Tell me about quantum physics"
     - "Who won the World Cup in 2022?"
+
 8. EVENT CREATION:
    When the user wants to create an event:
     - ANY request that mentions an event type (like "soccer event", "create a soccer event", "can you create a soccer event") 
@@ -341,12 +368,12 @@ Guidelines for your responses:
       3. Third response: Acknowledge the time and ask ONLY for the LOCATION
       4. Fourth response: Show summary of all details and ask for CONFIRMATION
       5. Final response: Only after confirmation, create the event and notify users
-    
-  
 
-        
-
-    
+🚨 NO RESULTS HANDLING:
+When no data is available or results are empty:
+- Acknowledge clearly: "I couldn't find any matches for [query] in our current database"
+- Suggest alternatives: "You could try searching for related interests like [actual available options]"
+- NEVER make up users, events, or data to fill the gap
 
 IMPORTANT GUIDELINES:
 - Be conversational and friendly
@@ -354,9 +381,11 @@ IMPORTANT GUIDELINES:
 - Always base your responses ONLY on the actual data provided in the API response
 - NEVER mention "clusters" or "algorithms" in your responses
 - NEVER make up information that isn't in the provided data
+- It's better to say "no results found" than to provide false information
 
 Remember that people use this platform to build their social connections, find events, and discover marketplace items.
 """
+
 
 def allowed_file(filename):
     return '.' in filename and \
@@ -774,46 +803,66 @@ class UserClusterer:
             plt.close(fig)
             
         return visualizations
+def expand_abbreviations(interest):
+    """Expand common abbreviations"""
+    abbreviations = {
+        'ai': 'artificial intelligence',
+        'ml': 'machine learning', 
+        'cs': 'computer science',
+        'ui': 'user interface',
+        'ux': 'user experience',
+        'it': 'information technology',
+        'vr': 'virtual reality',
+        'ar': 'augmented reality',
+        'diy': 'do it yourself',
+        'cv': 'computer vision'
+    }
+    
+    interest_lower = interest.lower().strip()
+    return abbreviations.get(interest_lower, interest)
 
+    
+    
+  
 # Helper Functions for User and Item Matching
 def find_users_by_interest(interest, df, fuzzy=True):
-    """Find users with a specific interest, with proper fuzzy matching"""
-    # Normalize the search interest (lowercase for comparison)
-    normalized_interest = interest.lower()
+    """Find users with a specific interest, with stricter fuzzy matching"""
+    expanded_interest = expand_abbreviations(interest)
+    normalized_interest = expanded_interest.lower()
+    # Remove this line: normalized_interest = interest.lower()
     
     matching_users = []
     
     for _, row in df.iterrows():
-        # Convert each user's interests to lowercase for comparison
         user_interests = [i.lower() for i in row['interests']]
         
-        # Initialize match variables
         best_match = None
-        best_match_score = float('inf')  # Lower is better for Levenshtein
+        best_match_score = float('inf')
         
         for user_interest in user_interests:
-            # Method 1: Exact match (fastest check)
+            # Method 1: Exact match (highest priority)
             if normalized_interest == user_interest:
                 best_match = user_interest
                 best_match_score = 0
                 break
                 
-            # Method 2: Containment check (one is substring of other)
-            if normalized_interest in user_interest or user_interest in normalized_interest:
-                # Calculate how much they differ in length as a rough measure of similarity
-                length_diff = abs(len(normalized_interest) - len(user_interest))
-                if length_diff < best_match_score:
-                    best_match = user_interest
-                    best_match_score = length_diff
-                    
-            # Method 3: Levenshtein distance (most comprehensive but slowest)
+            # Method 2: More strict containment check
             if fuzzy:
-                # Only check if strings are reasonably close in length (optimization)
+                # Only allow containment if the lengths are similar (within 50% of each other)
+                min_length = min(len(normalized_interest), len(user_interest))
+                max_length = max(len(normalized_interest), len(user_interest))
+                
+                if max_length <= min_length * 1.5:  # Within 50% length difference
+                    if normalized_interest in user_interest or user_interest in normalized_interest:
+                        length_diff = abs(len(normalized_interest) - len(user_interest))
+                        if length_diff < best_match_score:
+                            best_match = user_interest
+                            best_match_score = length_diff
+                
+                # Method 3: Levenshtein distance (for typos only)
                 if abs(len(normalized_interest) - len(user_interest)) <= 3:
                     distance = levenshtein_distance(normalized_interest, user_interest)
-                    
-                    # Set threshold based on string length (longer strings can tolerate more differences)
-                    max_allowed_distance = min(3, max(1, len(normalized_interest) // 3))
+                    max_allowed_distance = min(2, max(1, len(normalized_interest) // 4))
                     
                     if distance <= max_allowed_distance and distance < best_match_score:
                         best_match = user_interest
@@ -826,54 +875,49 @@ def find_users_by_interest(interest, df, fuzzy=True):
                 'age': int(row['age']),
                 'location': row['location'],
                 'matched_interest': best_match,
-                'match_quality': best_match_score,  # 0 is exact match, higher numbers are fuzzier matches
+                'match_quality': best_match_score,
                 'cluster': int(row['cluster']) if 'cluster' in row else None
             }
-            
             matching_users.append(user_info)
     
-    # Sort results with best matches first
     matching_users.sort(key=lambda x: x['match_quality'])
-    
     return matching_users
 def find_users_by_event(event, df, fuzzy=True):
-    """Find users interested in a specific event with fuzzy matching"""
-    # Normalize the search event (lowercase for comparison)
+    """Find users interested in a specific event with stricter fuzzy matching"""
     normalized_event = event.lower()
     
     matching_users = []
     
     for _, row in df.iterrows():
-        # Convert each user's preferred events to lowercase for comparison
         user_events = [e.lower() for e in row['preferred_events']]
         
-        # Initialize match variables
         best_match = None
-        best_match_score = float('inf')  # Lower is better for Levenshtein
+        best_match_score = float('inf')
         
         for user_event in user_events:
-            # Method 1: Exact match (fastest check)
+            # Method 1: Exact match (highest priority)
             if normalized_event == user_event:
                 best_match = user_event
                 best_match_score = 0
                 break
                 
-            # Method 2: Containment check (one is substring of other)
-            if normalized_event in user_event or user_event in normalized_event:
-                # Calculate how much they differ in length as a rough measure of similarity
-                length_diff = abs(len(normalized_event) - len(user_event))
-                if length_diff < best_match_score:
-                    best_match = user_event
-                    best_match_score = length_diff
-                    
-            # Method 3: Levenshtein distance (most comprehensive but slowest)
+            # Method 2: More strict containment check
             if fuzzy:
-                # Only check if strings are reasonably close in length (optimization)
+                # Only allow containment if the lengths are similar (within 50% of each other)
+                min_length = min(len(normalized_event), len(user_event))
+                max_length = max(len(normalized_event), len(user_event))
+                
+                if max_length <= min_length * 1.5:  # Within 50% length difference
+                    if normalized_event in user_event or user_event in normalized_event:
+                        length_diff = abs(len(normalized_event) - len(user_event))
+                        if length_diff < best_match_score:
+                            best_match = user_event
+                            best_match_score = length_diff
+                
+                # Method 3: Levenshtein distance (for typos only)
                 if abs(len(normalized_event) - len(user_event)) <= 3:
                     distance = levenshtein_distance(normalized_event, user_event)
-                    
-                    # Set threshold based on string length (longer strings can tolerate more differences)
-                    max_allowed_distance = min(3, max(1, len(normalized_event) // 3))
+                    max_allowed_distance = min(2, max(1, len(normalized_event) // 4))
                     
                     if distance <= max_allowed_distance and distance < best_match_score:
                         best_match = user_event
@@ -886,15 +930,13 @@ def find_users_by_event(event, df, fuzzy=True):
                 'age': int(row['age']),
                 'location': row['location'],
                 'matched_event': best_match,
-                'match_quality': best_match_score,  # 0 is exact match, higher numbers are fuzzier matches
+                'match_quality': best_match_score,
                 'cluster': int(row['cluster']) if 'cluster' in row else None
             }
-            
             matching_users.append(user_info)
     
     # Sort results with best matches first
     matching_users.sort(key=lambda x: x['match_quality'])
-    
     return matching_users
 
 def find_users_by_category(category, df):
@@ -1785,6 +1827,305 @@ def log_session_state(user_id, prefix=""):
     except Exception as e:
         print(f"{prefix} SESSION DEBUG - error logging session: {str(e)}")
 
+# Replace the section in your @app.route('/find_matches', methods=['POST']) function
+# where you handle "No results found" with this enhanced version:
+class SmartInterestRecommendationAssistant:
+    def __init__(self, client, interest_categories):
+        self.client = client
+        self.interest_categories = interest_categories
+        
+        # Create a flat list of all available interests
+        self.all_available_interests = []
+        for interests in interest_categories.values():
+            self.all_available_interests.extend(interests)
+        self.all_available_interests = list(set(self.all_available_interests))  # Remove duplicates
+        self.system_prompt = f"""
+You are an AI assistant for Tarp AI that helps users find relevant interests from our community platform.
+
+CRITICAL RULES:
+1. You can ONLY recommend interests that exist in our Tarp AI community
+2. If no similar interests exist, you MUST say so clearly
+3. NEVER suggest interests that are not available on our platform
+4. When recommending alternatives, explain the connection/similarity
+
+AVAILABLE INTERESTS ON TARP AI:
+{', '.join(self.all_available_interests)}
+
+AVAILABLE CATEGORIES:
+{', '.join(interest_categories.keys())}
+
+Your task:
+1. Check if the searched interest exists in our community (exact or fuzzy match)
+2. If it doesn't exist, find the most contextually similar interests that ARE available
+3. If no similar interests exist, clearly state this
+4. Always be honest about what's available vs what's not
+
+Response format:
+{{
+    "interest_found": true/false,
+    "exact_matches": ["list of exact matches"],
+    "similar_matches": ["list of contextually similar interests that exist"],
+    "explanation": "explanation of why these are similar",
+    "recommendation_message": "user-friendly message with recommendations or honest 'not available' response"
+}}
+
+Examples:
+
+Input: "wrestling"
+Response: {{
+    "interest_found": false,
+    "exact_matches": [],
+    "similar_matches": ["Martial Arts", "Weight Training"],
+    "explanation": "Wrestling involves combat sports techniques (similar to Martial Arts) and requires significant physical strength training (similar to Weight Training)",
+    "recommendation_message": "I couldn't find 'Wrestling' in our Tarp AI community yet, but I found some related interests: Martial Arts (combat techniques) and Weight Training (physical conditioning). Would you like to search for people with these interests instead?"
+}}
+
+Input: "machine learning" 
+Response: {{
+    "interest_found": false,
+    "exact_matches": [],
+    "similar_matches": ["AI", "Programming"],
+    "explanation": "Machine learning is a subset of AI and typically involves programming skills",
+    "recommendation_message": "I couldn't find 'Machine Learning' specifically in our community, but we have related interests: AI and Programming. These are closely related to machine learning work. Would you like to search for people interested in these instead?"
+}}
+
+Input: "underwater basket weaving"
+Response: {{
+    "interest_found": false,
+    "exact_matches": [],
+    "similar_matches": [],
+    "explanation": "No contextually similar interests found in our community",
+    "recommendation_message": "I couldn't find 'Underwater Basket Weaving' or any closely related interests in our Tarp AI community yet. You might want to browse our available categories like Arts, Crafts, or Sports to see what interests are available."
+}}
+"""
+        
+
+
+    def get_smart_recommendations(self, searched_interest, search_results=None):
+        """
+        Get smart recommendations for interests that aren't found in the database
+        """
+        try:
+            # First check if we actually found any results
+            has_results = False
+            if search_results:
+                for key, value in search_results.items():
+                    if isinstance(value, dict):
+                        for sub_key, sub_value in value.items():
+                            if isinstance(sub_value, list) and len(sub_value) > 0:
+                                has_results = True
+                                break
+                    elif isinstance(value, list) and len(value) > 0:
+                        has_results = True
+                        break
+                    if has_results:
+                        break
+            
+            # If we found results, no need for recommendations
+            if has_results:
+                return None
+            
+            # Build context for the LLM
+            context = f"""
+SEARCHED INTEREST: "{searched_interest}"
+SEARCH RESULTS: No matches found in database
+
+Find the most contextually similar interests from the available database that relate to "{searched_interest}".
+Only recommend interests that actually exist in the provided list.
+"""
+
+            # Call the LLM
+            response = self.client.chat.completions.create(
+                model="anthropic/claude-3-opus:beta",
+                messages=[
+                    {"role": "system", "content": self.system_prompt},
+                    {"role": "user", "content": context}
+                ],
+                temperature=0.3
+            )
+            
+            # Parse the response
+            response_text = response.choices[0].message.content
+            print(f"Smart Recommendation LLM Response: {response_text}")
+            
+            try:
+                result = json.loads(response_text)
+            except json.JSONDecodeError:
+                # Fallback if JSON parsing fails
+                result = {
+                    "interest_found": False,
+                    "exact_matches": [],
+                    "similar_matches": [],
+                    "explanation": "Could not analyze recommendations",
+                    "recommendation_message": f"I couldn't find '{searched_interest}' in our database. You might want to browse our available interest categories to see what's available."
+                }
+            
+            return result
+            
+        except Exception as e:
+            print(f"Error in smart recommendations: {str(e)}")
+            return {
+                "interest_found": False,
+                "exact_matches": [],
+                "similar_matches": [],
+                "explanation": f"Error occurred: {str(e)}",
+                "recommendation_message": f"I couldn't find '{searched_interest}' in our database. Please try browsing our available categories."
+            }
+
+    def verify_interests_exist(self, interests_list):
+        """
+        Verify that a list of interests actually exist in the database
+        """
+        verified_interests = []
+        for interest in interests_list:
+            # Check exact match (case insensitive)
+            for available_interest in self.all_available_interests:
+                if interest.lower() == available_interest.lower():
+                    verified_interests.append(available_interest)
+                    break
+        
+        return verified_interests
+
+    def get_available_categories_info(self):
+        """
+        Get information about available categories and their interests
+        """
+        categories_info = {}
+        for category, interests in self.interest_categories.items():
+            categories_info[category] = {
+                'count': len(interests),
+                'sample_interests': interests[:5]  # Show first 5 as examples
+            }
+        
+        return categories_info
+
+
+# Initialize the smart recommendation assistant
+smart_recommender = SmartInterestRecommendationAssistant(client, INTEREST_CATEGORIES)
+
+class SmartEventRecommendationAssistant:
+    def __init__(self, client, events_dict):
+        self.client = client
+        self.events_dict = events_dict
+        
+        # Create a flat list of all available events
+        self.all_available_events = []
+        for events in events_dict.values():
+            self.all_available_events.extend(events)
+        self.all_available_events = list(set(self.all_available_events))
+        
+        self.system_prompt = f"""
+You are an AI assistant for Tarp AI that helps users find relevant events from our community platform.
+
+CRITICAL RULES:
+1. You can ONLY recommend events that exist in our Tarp AI community
+2. If no similar events exist, you MUST say so clearly
+3. NEVER suggest events that are not available on our platform
+4. When recommending alternatives, explain the connection/similarity
+
+AVAILABLE EVENTS ON TARP AI:
+{', '.join(self.all_available_events)}
+
+AVAILABLE CATEGORIES:
+{', '.join(events_dict.keys())}
+
+Your task:
+1. Check if the searched event exists in our community (exact or fuzzy match)
+2. If it doesn't exist, find the most contextually similar events that ARE available
+3. If no similar events exist, clearly state this
+4. Always be honest about what's available vs what's not
+
+Response format:
+{{
+    "event_found": true/false,
+    "exact_matches": ["list of exact matches"],
+    "similar_matches": ["list of contextually similar events that exist"],
+    "explanation": "explanation of why these are similar",
+    "recommendation_message": "user-friendly message with recommendations or honest 'not available' response"
+}}
+
+Examples:
+
+Input: "python workshop"
+Response: {{
+    "event_found": false,
+    "exact_matches": [],
+    "similar_matches": ["Programming Workshops", "Tech Meetups"],
+    "explanation": "Python is a programming language, so Programming Workshops would cover similar content. Tech Meetups often include programming discussions and networking.",
+    "recommendation_message": "I couldn't find 'Python Workshop' specifically in our Tarp AI community, but we have Programming Workshops (which would cover Python and other languages) and Tech Meetups (great for programming discussions). Would you like to search for people attending these instead?"
+}}
+
+Input: "underwater basket weaving class"
+Response: {{
+    "event_found": false,
+    "exact_matches": [],
+    "similar_matches": [],
+    "explanation": "No contextually similar events found in our community",
+    "recommendation_message": "I couldn't find 'Underwater Basket Weaving Class' or any closely related events in our Tarp AI community yet. You might want to browse our available categories like Arts, Crafts, or General events to see what's available."
+}}
+"""
+
+
+    def get_smart_event_recommendations(self, searched_event, search_results=None):
+        """Get smart recommendations for events that aren't found in the database"""
+        try:
+            # First check if we actually found any results
+            has_results = False
+            if search_results and search_results.get('matching_users'):
+                has_results = len(search_results['matching_users']) > 0
+            
+            # If we found results, no need for recommendations
+            if has_results:
+                return None
+            
+            # Build context for the LLM
+            context = f"""
+SEARCHED EVENT: "{searched_event}"
+SEARCH RESULTS: No matches found in database
+
+Find the most contextually similar events from the available database that relate to "{searched_event}".
+Only recommend events that actually exist in the provided list.
+"""
+
+            # Call the LLM
+            response = self.client.chat.completions.create(
+                model="anthropic/claude-3-opus:beta",
+                messages=[
+                    {"role": "system", "content": self.system_prompt},
+                    {"role": "user", "content": context}
+                ],
+                temperature=0.3
+            )
+            
+            # Parse the response
+            response_text = response.choices[0].message.content
+            print(f"Smart Event Recommendation LLM Response: {response_text}")
+            
+            try:
+                result = json.loads(response_text)
+            except json.JSONDecodeError:
+                # Fallback if JSON parsing fails
+                result = {
+                    "event_found": False,
+                    "exact_matches": [],
+                    "similar_matches": [],
+                    "explanation": "Could not analyze recommendations",
+                    "recommendation_message": f"I couldn't find '{searched_event}' in our database. You might want to browse our available event categories to see what's available."
+                }
+            
+            return result
+            
+        except Exception as e:
+            print(f"Error in smart event recommendations: {str(e)}")
+            return {
+                "event_found": False,
+                "exact_matches": [],
+                "similar_matches": [],
+                "explanation": f"Error occurred: {str(e)}",
+                "recommendation_message": f"I couldn't find '{searched_event}' in our database. Please try browsing our available categories."
+            }
+# Initialize the smart event recommendation assistant
+smart_event_recommender = SmartEventRecommendationAssistant(client, EVENTS)
 @app.route('/find_matches', methods=['POST'])
 def find_matches():
     classification = request.json.get('classification', {})
@@ -1812,6 +2153,7 @@ def find_matches():
         
         results = {}
         
+        # Your existing query processing logic here...
         if query_type == 'interest_search':
             interests = entities.get('interests', [])
             
@@ -1855,72 +2197,112 @@ def find_matches():
                 
                 results['interest_results'] = interest_results
         
-        elif query_type == 'event_search':
-            event = entities.get('event', '')
-            category = entities.get('category', '')
-            
-            if event:
-                matching_users = find_users_by_event(event, df)
-                results['event_results'] = {
-                    'event': event,
-                    'matching_users': matching_users
-                }
-            
-            elif category:
-                category_events = get_events_by_category(category)
-                
-                if category_events:
-                    # Find users for each event in the category
-                    event_results = {}
-                    for event in category_events:
-                        matching_users = find_users_by_event(event, df)
-                        event_results[event] = matching_users
-                    
-                    results['category_event_results'] = {
-                        'category': category,
-                        'events': category_events,
-                        'event_results': event_results
-                    }
+        # ... (your other query type handling code) ...
         
-        elif query_type == 'category_search':
-            category = entities.get('category', '')
-            
-            if category:
-                matching_users = find_users_by_category(category, df)
-                category_interests = get_interests_by_category(category)
-                
-                results['category_results'] = {
-                    'category': category,
-                    'interests': category_interests,
-                    'matching_users': matching_users
-                }
+        # ENHANCED: Check if we have any results with smart recommendations
+        has_results = False
+        if results:
+            for key, value in results.items():
+                if isinstance(value, dict):
+                    # Check nested dictionaries for lists with data
+                    for sub_key, sub_value in value.items():
+                        if isinstance(sub_value, list) and len(sub_value) > 0:
+                            has_results = True
+                            break
+                    if has_results:
+                        break
+                elif isinstance(value, list) and len(value) > 0:
+                    has_results = True
+                    break
         
-        elif query_type == 'marketplace_search':
-            item = entities.get('marketplace_item', '')
-            action = entities.get('marketplace_action', '')
+        # Generate response using LLM with smart recommendations
+        if not has_results:
+            user_message = request.json.get('original_query', '')
             
-            if item and action:
-                if action == 'looking':
-                    # Find users who are offering the item
-                    matching_users = find_users_by_marketplace_offering(item, df)
+            # ENHANCED: Use smart recommendations for interest searches
+            if query_type == 'interest_search':
+                interests = entities.get('interests', [])
+                if interests:
+                    searched_interest = interests[0]  # Take the first interest
                     
-                    results['marketplace_results'] = {
-                        'item': item,
-                        'action': action,
-                        'matching_users': matching_users
-                    }
-                elif action == 'offering':
-                    # Find users who need the item
-                    matching_users = find_users_by_marketplace_need(item, df)
+                    # Get smart recommendations using the new assistant
+                    recommendations = smart_recommender.get_smart_recommendations(searched_interest, results)
                     
-                    results['marketplace_results'] = {
-                        'item': item,
-                        'action': action,
-                        'matching_users': matching_users
-                    }
-        
-        # Generate response using LLM
-        response_prompt = f"""
+                    if recommendations and recommendations.get('similar_matches'):
+                        # Verify that recommended interests actually exist in our database
+                        verified_interests = smart_recommender.verify_interests_exist(recommendations['similar_matches'])
+                        
+                        if verified_interests:
+                            response_prompt = f"""
+User searched for: {user_message}
+
+SMART RECOMMENDATION ANALYSIS:
+- Searched interest: "{searched_interest}" 
+- Found in database: {recommendations.get('interest_found', False)}
+- Similar interests available: {', '.join(verified_interests)}
+- Explanation: {recommendations.get('explanation', '')}
+
+Create a helpful response that:
+1. Clearly states that "{searched_interest}" is not in our database
+2. Explains the similar interests we DO have: {', '.join(verified_interests)}
+3. Explains why these are related: {recommendations.get('explanation', '')}
+4. Asks if they want to search for these alternatives instead
+
+Be honest about what's not available, but helpful about what IS available.
+"""
+                        else:
+                            response_prompt = f"""
+User searched for: {user_message}
+
+ANALYSIS: "{searched_interest}" is not in our database and no closely related interests are available.
+
+Create a response that:
+1. Clearly states that "{searched_interest}" is not available
+2. Suggests browsing our available categories: {', '.join(INTEREST_CATEGORIES.keys())}
+3. Be honest that we don't have this specific interest or close alternatives
+
+Do NOT suggest interests that don't exist in our database.
+"""
+                    else:
+                        response_prompt = f"""
+User searched for: {user_message}
+
+ANALYSIS: "{searched_interest}" is not in our database and no similar interests found.
+
+Available categories: {', '.join(INTEREST_CATEGORIES.keys())}
+
+Create a response that:
+1. Honestly states we don't have this interest
+2. Suggests browsing available categories
+3. Do NOT suggest specific interests that might not exist
+
+Be helpful but honest about limitations.
+"""
+                else:
+                    # Fallback for malformed interest searches
+                    response_prompt = f"""
+User searched for: {user_message}
+
+No specific interest detected or no results found.
+
+Available categories: {', '.join(INTEREST_CATEGORIES.keys())}
+
+Respond helpfully but only suggest browsing categories, not specific interests.
+"""
+            else:
+                # For non-interest searches, use existing logic
+                response_prompt = f"""
+User searched for: {user_message}
+
+No results found in the database for this query.
+
+Available categories: {', '.join(INTEREST_CATEGORIES.keys())}
+
+Respond helpfully about what the platform can help with, but be honest about limitations.
+"""
+        else:
+            # We have results - use the original prompt
+            response_prompt = f"""
 User query: {request.json.get('original_query', '')}
 
 API response data:
@@ -1930,14 +2312,14 @@ Based on this data, generate a helpful and friendly response. Focus on highlight
 """
 
         llm_response = client.chat.completions.create(
-            model="anthropic/claude-3-opus:beta",  # You can adjust this to your preferred model
+            model="anthropic/claude-3-opus:beta",
             messages=[
                 {"role": "system", "content": RESPONSE_GENERATOR_PROMPT},
                 {"role": "user", "content": response_prompt}
             ]
         )
         
-        # Prepare final response with summary statistics
+        # Prepare final response with summary statistics (existing code)
         summary_stats = {}
         
         if 'interest_results' in results:
@@ -1961,51 +2343,21 @@ Based on this data, generate a helpful and friendly response. Focus on highlight
             if 'common_users' in results['interest_results']:
                 summary_stats['interest_search']['users_with_all_interests'] = len(results['interest_results']['common_users'])
         
-        elif 'event_results' in results:
-            summary_stats['event_search'] = {
-                'event': results['event_results']['event'],
-                'total_users': len(results['event_results']['matching_users'])
-            }
-        
-        elif 'category_event_results' in results:
-            # Count total unique users across all events in the category
-            all_user_ids = set()
-            for event, users in results['category_event_results']['event_results'].items():
-                all_user_ids.update({user['user_id'] for user in users})
-            
-            summary_stats['category_event_search'] = {
-                'category': results['category_event_results']['category'],
-                'total_events': len(results['category_event_results']['events']),
-                'total_unique_users': len(all_user_ids)
-            }
-        
-        elif 'category_results' in results:
-            summary_stats['category_search'] = {
-                'category': results['category_results']['category'],
-                'total_interests': len(results['category_results']['interests']),
-                'total_users': len(results['category_results']['matching_users'])
-            }
-        
-        elif 'marketplace_results' in results:
-            summary_stats['marketplace_search'] = {
-                'item': results['marketplace_results']['item'],
-                'action': results['marketplace_results']['action'],
-                'total_users': len(results['marketplace_results']['matching_users'])
-            }
+        # ... (rest of your existing summary stats code) ...
         
         # Return both raw results, generated response, and summary statistics
         return jsonify({
             'success': True,
             'results': results,
             'response': llm_response.choices[0].message.content,
-            'summary_stats': summary_stats
+            'summary_stats': summary_stats,
+            'smart_recommendations': recommendations if not has_results and query_type == 'interest_search' else None
         })
     
     except Exception as e:
         import traceback
         print(traceback.format_exc())
         return jsonify({'success': False, 'error': str(e)})
-
 # Additional routes for enhanced functionality
 
 @app.route('/recommend_connections', methods=['POST'])
@@ -3885,7 +4237,7 @@ def get_user_state(user_id):
             ''')
             
             c.execute('SELECT current_state, state_data FROM user_states WHERE user_id = ?', (user_id,))
-            result = c.fetchone()ated
+            result = c.fetchone()
             conn.close()
             
             if result:
@@ -4534,6 +4886,130 @@ Respond with JSON:
 
 # Initialize the smart filtering assistant
 smart_filtering_assistant = SmartAttendeeFilteringAssistant(client, db, using_mongodb)
+
+# Add this new class to your paste.txt file
+
+
+
+
+# Update your find_matches route to use smart recommendations
+def enhance_find_matches_with_smart_recommendations():
+    """
+    This function shows how to modify your existing find_matches route
+    to include smart recommendations when no results are found
+    """
+    
+    # In your existing @app.route('/find_matches', methods=['POST']) function,
+    # replace the "No results found" section with this:
+    
+    # After you've processed the query and determined there are no results:
+    if not has_results:  # This is your existing check
+        user_message = request.json.get('original_query', '')
+        
+        # Extract the searched interest from the query
+        searched_interest = None
+        if query_type == 'interest_search':
+            interests = entities.get('interests', [])
+            if interests:
+                searched_interest = interests[0]  # Take the first interest
+        
+        if searched_interest:
+            # Get smart recommendations using the new assistant
+            recommendations = smart_recommender.get_smart_recommendations(searched_interest, results)
+            
+            if recommendations:
+                # Use the LLM-generated recommendation message
+                response_prompt = f"""
+User searched for: {user_message}
+
+{recommendations['recommendation_message']}
+
+Available interest categories: {', '.join(INTEREST_CATEGORIES.keys())}
+
+Use the recommendation message provided above, but make it conversational and helpful.
+Don't suggest interests that weren't mentioned in the recommendation message.
+"""
+            else:
+                # Fallback to category suggestions
+                response_prompt = f"""
+User searched for: {user_message}
+
+No results found in the database for this specific interest.
+
+Available interest categories: {', '.join(INTEREST_CATEGORIES.keys())}
+
+Be honest that the specific interest searched for is not in the database.
+Suggest browsing the available categories instead.
+"""
+        else:
+            # Original fallback logic for non-interest searches
+            response_prompt = f"""
+User searched for: {user_message}
+
+No results found in the database.
+
+Available categories: {', '.join(INTEREST_CATEGORIES.keys())}
+
+Respond helpfully but honestly about what's available.
+"""
+
+
+# Example usage in your response generation:
+def generate_enhanced_response_with_smart_recommendations(user_message, results, query_type, entities):
+    """
+    Enhanced response generation that includes smart recommendations
+    """
+    
+    # Check if we have any results
+    has_results = False
+    if results:
+        for key, value in results.items():
+            if isinstance(value, dict):
+                for sub_key, sub_value in value.items():
+                    if isinstance(sub_value, list) and len(sub_value) > 0:
+                        has_results = True
+                        break
+            elif isinstance(value, list) and len(value) > 0:
+                has_results = True
+                break
+            if has_results:
+                break
+    
+    if not has_results and query_type == 'interest_search':
+        # Extract the searched interest
+        interests = entities.get('interests', [])
+        if interests:
+            searched_interest = interests[0]
+            
+            # Get smart recommendations
+            recommendations = smart_recommender.get_smart_recommendations(searched_interest, results)
+            
+            if recommendations and recommendations['similar_matches']:
+                # We have smart recommendations
+                verified_interests = smart_recommender.verify_interests_exist(recommendations['similar_matches'])
+                
+                if verified_interests:
+                    response_message = f"""I couldn't find users interested in "{searched_interest}" in our current database.
+
+However, I found some related interests that we do have:
+{', '.join(f'• {interest}' for interest in verified_interests)}
+
+{recommendations['explanation']}
+
+Would you like me to search for people interested in any of these related topics instead?"""
+                else:
+                    response_message = f"""I couldn't find users interested in "{searched_interest}" in our current database, and unfortunately we don't have any closely related interests available either.
+
+You could try browsing our available categories: {', '.join(INTEREST_CATEGORIES.keys())}"""
+            else:
+                response_message = f"""I couldn't find users interested in "{searched_interest}" in our current database, and we don't have any closely related interests available.
+
+You could try browsing our available categories: {', '.join(INTEREST_CATEGORIES.keys())}"""
+            
+            return response_message
+    
+    # For other cases, use your existing logic
+    return "Standard response generation logic here..."
 
 # Updated handle_attendee_filtering function
 def handle_attendee_filtering(user_message, user_id, filtering_state):
@@ -5255,6 +5731,17 @@ def process_chat_query(user_message, filename=None, conversation_history=None, u
                             matching_users = find_users_by_interest(interest, df)
                             interest_results[interest] = matching_users
                         results['interest_results'] = interest_results
+                        has_results = any(len(users) > 0 for users in interest_results.values())
+                        if not has_results:
+                            searched_interest = interests[0]  # Take the first interest
+                            print(f"No results found for '{searched_interest}', getting smart recommendations...")
+                    
+                            recommendations = smart_recommender.get_smart_recommendations(searched_interest, results)
+                            if recommendations and recommendations.get('similar_matches'):
+                                results['smart_recommendations'] = recommendations
+                                print(f"Smart recommendations found: {recommendations['similar_matches']}")
+                            else:
+                                print("No smart recommendations available")
                 
                 elif query_type == 'event_search':
                     event = entities.get('event', '')
@@ -5265,7 +5752,18 @@ def process_chat_query(user_message, filename=None, conversation_history=None, u
                             'matching_users': matching_users
                         }
                 
-                
+                        has_results = len(matching_users) > 0
+        
+                        if not has_results:
+                            print(f"No results found for event '{event}', getting smart recommendations...")
+            
+                            recommendations = smart_event_recommender.get_smart_event_recommendations(event, results['event_results'])
+            
+                            if recommendations and recommendations.get('similar_matches'):
+                                results['smart_event_recommendations'] = recommendations
+                                print(f"Smart event recommendations found: {recommendations['similar_matches']}")
+                            else:
+                                print("No smart event recommendations available")
                 
             except Exception as e:
                 print(f"Error processing dataset: {str(e)}")
