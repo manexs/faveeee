@@ -1,0 +1,105 @@
+def expand_abbreviations(interest)
+def levenshtein_distance(s1, s2) 
+def find_users_by_interest(interest, df, fuzzy=True)
+def process_chat_query
+
+#Event search
+def find_users_by_event(event, df, fuzzy=True)
+
+#classes
+class SmartInterestRecommendationAssistant:
+    def __init__(self, client, interest_categories)
+    def get_smart_recommendations(self, searched_interest, search_results=None)
+    def verify_interests_exist(self, interests_list)
+
+class SmartEventRecommendationAssistant:
+    def __init__(self, client, events_dict)
+    def get_smart_event_recommendations(self, searched_event, search_results=None)
+interest flow
+User Query: "Computer Science"
+    ↓
+LLM Classification
+    ↓
+query_type = "interest_search"
+entities = {"interests": ["Computer Science"]}
+    ↓
+find_users_by_interest("Computer Science", df)
+    ↓
+FOR EACH USER IN DATABASE:
+    ↓
+Check user's interests: ["Programming", "Gaming", "AI"]
+    ↓
+Exact Match Check: "computer science" == "programming"? ❌
+Exact Match Check: "computer science" == "gaming"? ❌  
+Exact Match Check: "computer science" == "ai"? ❌
+    ↓
+Fuzzy Match Check: Length difference too big
+"computer science" (16 chars) vs "programming" (11 chars)
+16 > 11 * 1.5 (16.5) ❌ Skip
+    ↓
+Same for all other interests → NO MATCHES FOUND
+    ↓
+results = {'interest_results': {'Computer Science': []}}
+    ↓
+Check: has_results = False (empty list)
+    ↓
+smart_recommender.get_smart_recommendations("Computer Science", results)
+    ↓
+Smart LLM Call: "Find similar interests to Computer Science"
+    ↓
+LLM Response: {"similar_matches": ["Programming", "AI"]}
+    ↓
+Verify interests exist in database: ✅ Both exist
+    ↓
+results['smart_recommendations'] = LLM recommendations
+    ↓
+Response Generator LLM gets both original results + smart recommendations
+    ↓
+Final Response: "I couldn't find Computer Science, but try Programming or AI"
+
+
+
+
+event flow 
+User Query: "Python Workshop"
+    ↓
+LLM Classification  
+    ↓
+query_type = "event_search"
+entities = {"event": "Python Workshop"}
+    ↓
+find_users_by_event("Python Workshop", df)
+    ↓
+FOR EACH USER IN DATABASE:
+    ↓
+Check user's events: ["Tech Meetups", "Cooking Classes"]
+    ↓
+Exact Match Check: "python workshop" == "tech meetups"? ❌
+Exact Match Check: "python workshop" == "cooking classes"? ❌
+    ↓
+Fuzzy Match Check: Length difference too big
+"python workshop" (15 chars) vs "tech meetups" (12 chars)  
+15 > 12 * 1.5 (18) ✅ Within range
+    ↓
+Containment Check: "python workshop" in "tech meetups"? ❌
+Containment Check: "tech meetups" in "python workshop"? ❌
+    ↓
+Same for all other events → NO MATCHES FOUND
+    ↓
+results = {'event_results': {'event': 'Python Workshop', 'matching_users': []}}
+    ↓
+Check: has_results = False (empty list)
+    ↓
+smart_event_recommender.get_smart_event_recommendations("Python Workshop", results)
+    ↓
+Smart LLM Call: "Find similar events to Python Workshop"
+    ↓
+LLM Response: {"similar_matches": ["Programming Workshops", "Tech Meetups"]}
+    ↓
+Verify events exist in database: ✅ Both exist
+    ↓
+results['smart_event_recommendations'] = LLM recommendations
+    ↓
+Response Generator LLM gets both original results + smart recommendations
+    ↓
+Final Response: "I couldn't find Python Workshop, but try Programming Workshops or Tech Meetups"
